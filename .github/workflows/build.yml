@@ -54,43 +54,31 @@ jobs:
         echo "APK Size: $(du -h app/build/outputs/apk/debug/app-debug.apk | cut -f1)"
     
     - name: Create Release
-      if: success() && github.ref == 'refs/heads/main' && github.event_name == 'push'
-      uses: softprops/action-gh-release@v1
+      if: success() && github.ref == 'refs/heads/main'
+      uses: softprops/action-gh-release@v2
       with:
-        tag_name: v1.0.${{ github.run_number }}
-        name: Hand Gesture Mark 2 - v1.0.${{ github.run_number }}
+        tag_name: v1.2.${{ github.run_number }}
+        name: Hand Gesture Mark 2 - v1.2.${{ github.run_number }}
         body: |
           ## 👋 Hand Gesture Control - Mark 2
-          
+
           **Build #${{ github.run_number }}**
-          
+
           ### ✨ Features:
           - 👆 Point to tap - Hold finger still for 1 second
-          - ↔️ Swipe gestures - Scroll left/right
-          - 🤏 Pinch zoom - Thumb + index finger
-          - 🖐️ Activation gesture - Two fingers to enable
-          - ⏸️ Auto-pause - When hand not visible
-          - 🔋 Battery optimized - 15 FPS processing
-          - 📱 Works offline - No internet needed
+          - ↔️ Swipe gestures - Scroll left/right/up/down (palm or pointing finger)
+          - 🔒 One-shot gestures - a gesture fires once until the hand is removed
+          - ✌️ Two finger activation
           - 📷 Front camera only
-          
+          - 🔋 Battery optimized
+          - 📱 Works offline - No internet needed
+
           ### 📥 Installation:
           1. Download `app-debug.apk` below
           2. Enable "Install from Unknown Sources"
           3. Install the APK
           4. Grant Camera, Overlay, and Accessibility permissions
           5. Start using hand gestures!
-          
-          ### 📋 Requirements:
-          - Android 7.0 (API 24) or higher
-          - Front-facing camera
-          - Minimum 2GB RAM
-          
-          ### 🔧 What's New:
-          - Complete rebuild from scratch
-          - Improved permission handling
-          - Better camera integration
-          - Optimized performance
         files: app/build/outputs/apk/debug/app-debug.apk
         draft: false
         prerelease: false
