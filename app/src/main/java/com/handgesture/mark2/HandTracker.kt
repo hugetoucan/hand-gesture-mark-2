@@ -91,7 +91,7 @@ class HandTracker(private val context: Context) {
             lastTimestampMs = ts
 
             val mpImage = BitmapImageBuilder(bitmap).build()
-            val result: HandLandmarkerResult? = handLandmarker?.detect(mpImage, ts)
+            val result: HandLandmarkerResult? = handLandmarker?.detectForVideo(mpImage, ts)
 
             if (result != null && result.landmarks().isNotEmpty()) {
                 val landmarks = mutableListOf<FloatArray>()
