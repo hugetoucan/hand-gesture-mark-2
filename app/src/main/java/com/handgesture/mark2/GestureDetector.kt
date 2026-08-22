@@ -13,7 +13,11 @@ class GestureDetector {
         private const val MIDDLE_TIP = 12
         private const val RING_TIP = 16
         private const val PINKY_TIP = 20
+        private const val WRIST = 0
         private const val INDEX_MCP = 5
+        private const val MIDDLE_MCP = 9
+        private const val RING_MCP = 13
+        private const val PINKY_MCP = 17
 
         // Thresholds
         private const val PINCH_THRESHOLD = 0.05f
@@ -43,14 +47,18 @@ class GestureDetector {
 
     private var listener: GestureListener? = null
 
-    // Tap state: fires ONCE per hold, re-arms only after the finger moves away
+    // Tap state: fires ONCE per hold, re-arms only when the finger moves away
     private var lastPointPosition: Pair<Float, Float>? = null
     private var pointStartTime: Long = 0
     private var pointFired = false
 
-    // Swipe state: accumulates fingertip displacement, cooldown between swipes
+    // Swipe state: accumulates tracked-point displacement, cooldown between swipes
     private var swipeStart: Pair<Float, Float>? = null
     private var swipeCooldownUntil: Long = 0
+
+    // One-shot lock: after a gesture fires, the SAME gesture is suppressed until
+    // the hand is fully removed (reset()) or a DIFFERENT gesture fires first.
+    private var lastFiredGesture: Gesture? = null
 
     private var lastPinchDistance: Float = 0f
     private var lastMiscGestureAt: Long = 0
@@ -67,7 +75,7 @@ class GestureDetector {
         if (isTwoFingers(landmarks)) {
             if (now - lastMiscGestureAt >= MISC_GESTURE_COOLDOWN_MS) {
                 lastMiscGestureAt = now
-                listener?.onGestureDetected(Gesture.TWO_FINGERS, 0f, 0f)
+                fire(Gesture.TWO_FINGERS, 0f, 0f)
             }
             return
         }
@@ -90,7 +98,7 @@ class GestureDetector {
 
             if (now - lastMiscGestureAt >= MISC_GESTURE_COOLDOWN_MS) {
                 lastMiscGestureAt = now
-                listener?.onGestureDetected(gesture, centerX, centerY)
+                fire(gesture, centerX, centerY)
             }
             lastPinchDistance = pinchDistance
             return
@@ -99,65 +107,85 @@ class GestureDetector {
         lastPinchDistance = pinchDistance
 
         if (isPointing(landmarks)) {
-            val currentX = landmarks[INDEX_TIP][0]
-            val currentY = landmarks[INDEX_TIP][1]
+            // Pointing finger: tap (hold) + swipe track the index fingertip
+            updateTap(landmarks[INDEX_TIP][0], landmarks[INDEX_TIP][1], now)
+            updateSwipe(landmarks[INDEX_TIP][0], landmarks[INDEX_TIP][1], now)
+        } else if (isOpenPalm(landmarks)) {
+            // Open palm: whole-hand swipe - wave the hand and it's a swipe
+            val (palmX, palmY) = palmCenter(landmarks)
+            updateSwipe(palmX, palmY, now)
+        } else {
+            // Unrecognized hand shape: clear tracking state but keep the
+            // one-shot gesture lock (only a full hand removal releases it)
+            resetTracking()
+        }
+    }
 
-            // --- Tap: hold the fingertip still, fires ONCE per hold ---
-            val lastPos = lastPointPosition
-            if (lastPos != null) {
-                val distance = calculateDistance(
-                    floatArrayOf(currentX, currentY, 0f),
-                    floatArrayOf(lastPos.first, lastPos.second, 0f)
-                )
+    private fun updateTap(currentX: Float, currentY: Float, now: Long) {
+        val lastPos = lastPointPosition
+        if (lastPos != null) {
+            val distance = calculateDistance(
+                floatArrayOf(currentX, currentY, 0f),
+                floatArrayOf(lastPos.first, lastPos.second, 0f)
+            )
 
-                if (distance < POINT_THRESHOLD) {
-                    if (!pointFired) {
-                        val holdTime = now - pointStartTime
+            if (distance < POINT_THRESHOLD) {
+                if (!pointFired) {
+                    val holdTime = now - pointStartTime
 
-                        if (holdTime >= HOLD_DURATION_MS) {
-                            listener?.onGestureDetected(Gesture.POINT, currentX, currentY)
-                            pointFired = true
-                        }
+                    if (holdTime >= HOLD_DURATION_MS) {
+                        pointFired = true
+                        fire(Gesture.POINT, currentX, currentY)
                     }
-                } else {
-                    // Finger moved: restart the hold timer and re-arm the tap
-                    lastPointPosition = Pair(currentX, currentY)
-                    pointStartTime = now
-                    pointFired = false
                 }
             } else {
+                // Finger moved: restart the hold timer and re-arm the tap
                 lastPointPosition = Pair(currentX, currentY)
                 pointStartTime = now
                 pointFired = false
             }
-
-            // --- Swipe: accumulated displacement of the fingertip, with cooldown ---
-            if (now >= swipeCooldownUntil) {
-                val start = swipeStart
-                if (start == null) {
-                    swipeStart = Pair(currentX, currentY)
-                } else {
-                    val dx = currentX - start.first
-                    val dy = currentY - start.second
-                    val adx = abs(dx)
-                    val ady = abs(dy)
-
-                    if (max(adx, ady) >= SWIPE_DISTANCE) {
-                        val gesture = when {
-                            adx > ady * SWIPE_AXIS_RATIO && dx > 0 -> Gesture.SWIPE_RIGHT
-                            adx > ady * SWIPE_AXIS_RATIO -> Gesture.SWIPE_LEFT
-                            dy > 0 -> Gesture.SWIPE_DOWN
-                            else -> Gesture.SWIPE_UP
-                        }
-                        listener?.onGestureDetected(gesture, currentX, currentY)
-                        swipeStart = null
-                        swipeCooldownUntil = now + SWIPE_COOLDOWN_MS
-                    }
-                }
-            }
         } else {
-            reset()
+            lastPointPosition = Pair(currentX, currentY)
+            pointStartTime = now
+            pointFired = false
         }
+    }
+
+    private fun updateSwipe(trackX: Float, trackY: Float, now: Long) {
+        if (now < swipeCooldownUntil) return
+
+        val start = swipeStart
+        if (start == null) {
+            swipeStart = Pair(trackX, trackY)
+            return
+        }
+
+        val dx = trackX - start.first
+        val dy = trackY - start.second
+        val adx = abs(dx)
+        val ady = abs(dy)
+
+        if (max(adx, ady) < SWIPE_DISTANCE) return
+
+        val gesture = when {
+            adx > ady * SWIPE_AXIS_RATIO && dx > 0 -> Gesture.SWIPE_RIGHT
+            adx > ady * SWIPE_AXIS_RATIO -> Gesture.SWIPE_LEFT
+            dy > 0 -> Gesture.SWIPE_DOWN
+            else -> Gesture.SWIPE_UP
+        }
+        fire(gesture, trackX, trackY)
+        swipeStart = null
+        swipeCooldownUntil = now + SWIPE_COOLDOWN_MS
+    }
+
+    /**
+     * One-shot emission: the same gesture will not fire again until the hand is
+     * fully removed (reset()) or a different gesture fires first.
+     */
+    private fun fire(gesture: Gesture, x: Float, y: Float) {
+        if (gesture == lastFiredGesture) return
+        lastFiredGesture = gesture
+        listener?.onGestureDetected(gesture, x, y)
     }
 
     private fun isPointing(landmarks: List<FloatArray>): Boolean {
@@ -170,6 +198,14 @@ class GestureDetector {
         return indexExtended && middleCurled && ringCurled && pinkyCurled
     }
 
+    private fun isOpenPalm(landmarks: List<FloatArray>): Boolean {
+        // All four fingers extended above their knuckles
+        return landmarks[INDEX_TIP][1] < landmarks[INDEX_MCP][1] &&
+            landmarks[MIDDLE_TIP][1] < landmarks[MIDDLE_MCP][1] &&
+            landmarks[RING_TIP][1] < landmarks[RING_MCP][1] &&
+            landmarks[PINKY_TIP][1] < landmarks[PINKY_MCP][1]
+    }
+
     private fun isTwoFingers(landmarks: List<FloatArray>): Boolean {
         // Index and middle fingers extended, others curled
         val indexExtended = landmarks[INDEX_TIP][1] < landmarks[INDEX_MCP][1]
@@ -180,6 +216,18 @@ class GestureDetector {
         return indexExtended && middleExtended && ringCurled && pinkyCurled
     }
 
+    /** Palm center: average of the wrist and the four finger knuckles */
+    private fun palmCenter(landmarks: List<FloatArray>): Pair<Float, Float> {
+        var x = 0f
+        var y = 0f
+        val indices = intArrayOf(WRIST, INDEX_MCP, MIDDLE_MCP, RING_MCP, PINKY_MCP)
+        for (i in indices) {
+            x += landmarks[i][0]
+            y += landmarks[i][1]
+        }
+        return Pair(x / indices.size, y / indices.size)
+    }
+
     private fun calculateDistance(point1: FloatArray, point2: FloatArray): Float {
         val dx = point1[0] - point2[0]
         val dy = point1[1] - point2[1]
@@ -187,13 +235,20 @@ class GestureDetector {
         return sqrt(dx * dx + dy * dy + dz * dz)
     }
 
-    fun reset() {
+    /** Clears tracking state but KEEPS the one-shot gesture lock */
+    private fun resetTracking() {
         lastPointPosition = null
         pointStartTime = 0
         pointFired = false
         swipeStart = null
+    }
+
+    /** Full reset including the one-shot gesture lock. Called when the hand leaves the frame. */
+    fun reset() {
+        resetTracking()
         swipeCooldownUntil = 0
         lastPinchDistance = 0f
         lastMiscGestureAt = 0
+        lastFiredGesture = null
     }
 }

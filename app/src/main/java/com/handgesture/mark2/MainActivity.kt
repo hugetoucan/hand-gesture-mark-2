@@ -52,6 +52,9 @@ class MainActivity : AppCompatActivity(),
     private var handVisible = false
     private var lastHandStatusUpdate = 0L
 
+    // Timestamp of when the hand left the frame (used to release gesture locks)
+    private var noHandSince = 0L
+
     companion object {
         private const val TAG = "MainActivity"
         private const val REQUEST_CAMERA = 100
@@ -285,6 +288,8 @@ class MainActivity : AppCompatActivity(),
 
     // HandTracker.HandTrackingListener implementation
     override fun onHandDetected(landmarks: List<FloatArray>) {
+        noHandSince = 0L
+
         // Throttle the per-frame status update to avoid UI jank
         val now = System.currentTimeMillis()
         if (!handVisible || now - lastHandStatusUpdate > 1000L) {
@@ -300,13 +305,22 @@ class MainActivity : AppCompatActivity(),
     }
 
     override fun onNoHandDetected() {
+        val now = System.currentTimeMillis()
+        if (noHandSince == 0L) noHandSince = now
+
         // Only update the status text when the hand state actually changes
         if (handVisible) {
             handVisible = false
-            lastHandStatusUpdate = System.currentTimeMillis()
+            lastHandStatusUpdate = now
             runOnUiThread {
                 statusText.text = "No hand detected"
             }
+        }
+
+        // The hand has been fully out of view for a moment: release the
+        // one-shot gesture lock so the same gesture can be used again.
+        if (now - noHandSince >= 300L) {
+            gestureDetector.reset()
         }
     }
 
