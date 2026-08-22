@@ -15,14 +15,8 @@ git clone https://github.com/crajveer1212-dotcom/hand-gesture-mark-2.git
 cd hand-gesture-mark-2
 ```
 
-2. **Download MediaPipe Model:**
-```bash
-mkdir -p app\src\main\assets
-curl -L "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/latest/hand_landmarker.task" -o app\src\main\assets\hand_landmarker.task
-```
-
-Or download manually:
-- Go to: https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/latest/hand_landmarker.task
+2. **MediaPipe Model:** already included in the repository at `app/src/main/assets/hand_landmarker.task`. If you need to refresh it, download from:
+- https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/latest/hand_landmarker.task
 - Save to: `app/src/main/assets/hand_landmarker.task`
 
 3. **Open in Android Studio:**

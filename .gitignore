@@ -81,6 +81,3 @@ lint-results_files/
 
 # MacOS
 .DS_Store
-
-# MediaPipe model (too large for git)
-app/src/main/assets/hand_landmarker.task
